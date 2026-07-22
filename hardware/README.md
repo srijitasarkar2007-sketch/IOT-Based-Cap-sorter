@@ -1,3 +1,3 @@
 # Hardware
 
-Contains circuit diagrams and PCB files.
+Contains circuit diagrams .
