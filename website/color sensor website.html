@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Color Detection Control Center</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #f4f6f9;
+            --card-color: #ffffff;
+            --text-color: #333333;
+            --primary-color: #2563eb;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .status-bar {
+            background-color: #fee2e2;
+            color: #991b1b;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 20px;
+            transition: all 0.3s ease;
+        }
+        .status-bar.connected {
+            background-color: #dcfce7;
+            color: #166534;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+        @media(min-width: 768px) {
+            .grid { grid-template-columns: 1fr 1fr; }
+        }
+        .card {
+            background: var(--card-color);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+        h2 { margin-top: 0; font-size: 1.2rem; color: #4b5563; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px;}
+        .btn-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        button {
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s, background-color 0.2s;
+        }
+        button:active { transform: scale(0.98); }
+        .btn-cal { background-color: #e0e7ff; color: #4338ca; }
+        .btn-cal:hover { background-color: #c7d2fe; }
+        .btn-start { background-color: #dcfce7; color: #166534; }
+        .btn-start:hover { background-color: #bbf7d0; }
+        .btn-stop { background-color: #fee2e2; color: #991b1b; }
+        .btn-stop:hover { background-color: #fecaca; }
+        .btn-action { background-color: #f3f4f6; color: #1f2937; grid-column: span 2; }
+        .btn-action:hover { background-color: #e5e7eb; }
+        .btn-detect { background-color: #3b82f6; color: white; grid-column: span 2; font-size: 1rem;}
+        .btn-detect:hover { background-color: #2563eb; }
+        
+        #log-terminal {
+            background-color: #1e293b;
+            color: #38bdf8;
+            font-family: 'Courier New', Courier, monospace;
+            padding: 15px;
+            border-radius: 8px;
+            height: 250px;
+            overflow-y: auto;
+            font-size: 0.9rem;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>Color Sensor Workspace</h1>
+        <p>HiveMQ Core Real-time Embedded Interface</p>
+    </header>
+
+    <div id="connection-status" class="status-bar">Broker State: Offline</div>
+
+    <div class="grid">
+        <div class="card">
+            <h2>Calibration Matrix</h2>
+            <div class="btn-group">
+                <button class="btn-cal" onclick="sendCmd('c1')">Calibrate Color 1</button>
+                <button class="btn-cal" onclick="sendCmd('c2')">Calibrate Color 2</button>
+                <button class="btn-cal" onclick="sendCmd('c3')">Calibrate Color 3</button>
+                <button class="btn-cal" onclick="sendCmd('c4')">Calibrate Color 4</button>
+            </div>
+
+            <h2>Engine Controls</h2>
+            <div class="btn-group">
+                <button class="btn-start" onclick="sendCmd('D')">Run Diagnostics (D)</button>
+                <button class="btn-stop" onclick="sendCmd('stop')">Halt Processing</button>
+                <button class="btn-detect" onclick="sendCmd('detect')">Trigger Manual One-Shot Capture</button>
+                <button class="btn-action" onclick="sendCmd('show')">Query Local Calibration Profiles</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Hardware Telemetry Console Log</h2>
+            <div id="log-terminal">Initializing pipeline... Terminal listening.</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- HiveMQ Configuration Details ---
+    const BROKER_HOST = "xxxxxxxxxxxxxxxxxx.s1.eu.hivemq.cloud"; // Paste your own Cluster URL here
+    const PORT = 8884; // Secure WebSockets port for HiveMQ Cloud
+    const CLIENT_ID = "web_dashboard_" + Math.random().toString(16).substr(2, 8);
+    const USERNAME = "xxxxxxx"; // Your database user username
+    const PASSWORD = "xxxxxxx"; // Your database user password
+
+    const TOPIC_CMD = "color/hardware/cmd";
+    const TOPIC_LOG = "color/hardware/log";
+
+    // Options required for HiveMQ Cloud WebSockets
+    const options = {
+        connectTimeout: 4000,
+        clientId: CLIENT_ID,
+        keepalive: 60,
+        clean: true,
+        username: USERNAME,
+        password: PASSWORD,
+        protocol: 'wss'
+    };
+
+    console.log("Connecting to HiveMQ Broker...");
+    const client = mqtt.connect(`wss://${BROKER_HOST}:${PORT}/mqtt`, options);
+
+    const statusWidget = document.getElementById("connection-status");
+    const logTerminal = document.getElementById("log-terminal");
+
+    client.on('connect', () => {
+        statusWidget.textContent = "Broker State: Connected to HiveMQ Cloud Securely";
+        statusWidget.className = "status-bar connected";
+        appendLog("[System] Connected to MQTT Broker via WebSockets.");
+        
+        // Subscribe to hardware logging stream
+        client.subscribe(TOPIC_LOG, (err) => {
+            if (!err) appendLog("[System] Subscribed to telemetry feedback channels.");
+        });
+    });
+
+    client.on('message', (topic, payload) => {
+        if(topic === TOPIC_LOG) {
+            appendLog(payload.toString());
+        }
+    });
+
+    client.on('close', () => {
+        statusWidget.textContent = "Broker State: Offline / Disconnected";
+        statusWidget.className = "status-bar";
+    });
+
+    client.on('error', (err) => {
+        appendLog("[Error] Connection failure: " + err);
+    });
+
+    function sendCmd(commandString) {
+        if (client.connected) {
+            client.publish(TOPIC_CMD, commandString, { qos: 0, retain: false });
+            appendLog(`[Sent Command] -> ${commandString}`);
+        } else {
+            alert("Unable to send command. MQTT Broker is currently offline.");
+        }
+    }
+
+    function appendLog(message) {
+        const timestamp = new Date().toLocaleTimeString();
+        logTerminal.textContent += `\n[${timestamp}] ${message}`;
+        logTerminal.scrollTop = logTerminal.scrollHeight;
+    }
+</script>
+
+</body>
+</html>
